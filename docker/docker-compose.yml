@@ -1,0 +1,35 @@
+version: "3"
+
+services:
+  db:
+    container_name: next-move-mysql-server
+    image: mysql:8.0
+    restart: always
+    ports:
+      - "3310:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: next-move
+      MYSQL_USER: next-move
+      MYSQL_PASSWORD: password
+  mailhog:
+    container_name: next-move-mailhog-server
+    image: mailhog/mailhog:v1.0.1
+    restart: always
+    ports:
+      - "8035:8025"
+  web:
+    container_name: next-move-api-server
+    image: ammaar23/php:8.4
+    volumes:
+      - ../:/var/www/html
+      - ./nginx/default:/etc/nginx/sites-available/default
+    restart: always
+    ports:
+      - "8100:80"
+    depends_on:
+      - next-move-mysql-server
+      - next-move-mailhog-server
+    external_links:
+      - next-move-mysql-server
+      - next-move-mailhog-server

@@ -1,0 +1,152 @@
+#!/bin/bash
+COLOUR_RED="\033[0;31m"
+COLOUR_GREEN="\033[0;32m"
+COLOUR_BLUE="\033[0;34m"
+NO_COLOUR="\033[0m"
+
+network_name="next-move_network"
+mysql_container_name="next-move-mysql-server"
+mailhog_container_name="next-move-mailhog-server"
+app_container_name="next-move-api-server"
+mysql_container="docker exec -u mysql -it $mysql_container_name"
+app_container="docker exec -u www-data -it $app_container_name"
+command_create_network="docker network create --driver=bridge --gateway=172.32.0.1 --subnet=172.32.0.0/16 $network_name"
+command_delete_network="docker network rm $network_name"
+wait_time=15
+
+info() {
+  echo -e "${COLOUR_BLUE}Info:${NO_COLOUR} $@"
+}
+
+success() {
+  echo -e "${COLOUR_GREEN}Success:${NO_COLOUR} $@"
+}
+
+error() {
+  echo -e "${COLOUR_RED}Error:${NO_COLOUR} $@"
+}
+
+setup_build() {
+  if [[ "$(docker network ls | grep "$network_name")" == "" ]] ; then
+    info "Creating $network_name network"
+    $command_create_network
+    success "$network_name network created successfully"
+    echo ""
+  fi
+
+  if [ ! "$(docker ps -q -f name=$app_container_name)" ]; then
+    info "Bringing up containers"
+    docker compose --file=docker/docker-compose.yml --project-name=$app_container_name up -d
+    success "Containers running successfully"
+    echo ""
+  fi
+}
+
+setup_start() {
+  if [ ! "$(docker ps -q -f name=$app_container_name)" ]; then
+    error "You must build the containers prior to this command"
+    exit 1
+  fi
+
+  info "Waiting for $wait_time seconds while containers start running"
+  sleep $wait_time
+
+  info "Installing PHP dependencies"
+  $app_container bash -c "[ ! -d vendor ] && composer install"
+  success "PHP dependencies installed successfully"
+  echo ""
+
+  info "Setting up environment file"
+  $app_container bash -c "[ ! -f .env ] && cp .env.example .env && php artisan key:generate"
+  success "Environment file setup successfully"
+  echo ""
+
+  info "Migrating database"
+  $app_container bash -c "php artisan migrate --seed"
+  success "Database migrated successfully"
+  echo ""
+}
+
+setup_stop() {
+  declare -a arr=("$mysql_container_name" "$mailhog_container_name" "$app_container_name")
+
+  for i in "${arr[@]}"
+  do
+    if [ "$(docker ps -q -f name="$i")" ]; then
+      info "Stopping $i container"
+      docker kill "$i"
+      success "$i container stopped successfully"
+      echo ""
+    fi
+  done
+}
+
+setup_delete() {
+  setup_stop
+
+  declare -a arr=("$mysql_container_name" "$mailhog_container_name" "$app_container_name")
+
+  for i in "${arr[@]}"
+  do
+    if [ "$(docker ps -a -q -f name="$i")" ]; then
+      info "Deleting $i container"
+      docker rm "$i"
+      success "$i container deleted successfully"
+      echo ""
+    fi
+  done
+
+  if [[ "$(docker network ls | grep "$network_name")" != "" ]] ; then
+    info "Deleting $network_name network"
+    $command_delete_network
+    success "$network_name network deleted successfully"
+  fi
+}
+
+test_application() {
+  $app_container bash -c "php artisan test"
+}
+
+ssh_container() {
+  if [ ! "$(docker ps -q -f name=$app_container_name)" ]; then
+    error "You must setup the application prior to this command"
+    exit 1
+  fi
+
+  if [ "$1" == "mysql" ]; then
+    $mysql_container bash
+  else
+    $app_container bash
+  fi
+}
+
+case $1 in
+  "build")
+    setup_build
+    ;;
+
+  "start")
+    setup_start
+    ;;
+
+  "stop")
+    setup_stop
+    ;;
+
+  "delete")
+    setup_delete
+    ;;
+
+  "test")
+    test_application
+    ;;
+
+  "ssh")
+    ssh_container "$2"
+    ;;
+
+  *)
+    error "You must provide one of the following arguments [build, start, stop, delete, test, ssh]"
+    exit 1
+    ;;
+esac
