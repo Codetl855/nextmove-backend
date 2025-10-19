@@ -12,3 +12,4 @@ Route::middleware(['auth:sanctum', 'verified'])->group(function () {
 });
 Route::get('/featured-properties/{property_type?}', [PropertyController::class, 'featuredProperties']);
 Route::get('/get-property/{property}', [PropertyController::class, 'getProperty']);
+Route::post('/search-properties', [PropertyController::class, 'searchProperties']);
